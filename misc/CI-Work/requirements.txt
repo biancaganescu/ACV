@@ -1,0 +1,17 @@
+anthropic==0.79.0
+Jinja2==3.1.6
+joblib==1.5.3
+langchain==1.2.10
+numpy==2.4.2
+openai==0.28.0
+pandas==3.0.0
+procoder==0.0.1
+pydantic==1.10.26
+python-dotenv==1.2.1
+rouge_score==0.1.2
+tenacity==9.1.2
+tenacity==8.5.0
+tiktoken==0.12.0
+tqdm==4.67.1
+typing_extensions==4.15.0
+vllm==0.5.4

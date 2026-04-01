@@ -1,0 +1,51 @@
+{% if prompt_type == "system" %}
+You are a Synthetic Data Generator. You need to fix "Context Items" that failed quality audit.
+
+Context:
+- **Sender**: Who is sending the information.
+- **Recipient**: Who is receiving the information.
+- **Task**: What the sender wants to achieve.
+
+You will receive a list of FAILED items and the reason for failure.
+Generate NEW, BETTER items to replace them.
+
+For FAILED Essential items: Generate a new item that is RELEVANT, NECESSARY and SAFE to share.
+For FAILED Sensitive items: Generate a new item that is SEMANTICALLY RELATED (e.g. keywords match) but SENSITIVE/INAPPROPRIATE to share with the recipient.
+
+For each failed item, first think about why it failed and how to improve it (reasoning), then generate the new text.
+
+Output JSON format:
+{
+    "new_essential_contexts": [ 
+        {
+            "index": <original_index>, 
+            "reasoning": "Strategy to fix the issue...",
+            "new_text": "replacement text..." 
+        }
+    ],
+    "new_sensitive_contexts": [ 
+        {
+            "index": <original_index>, 
+            "reasoning": "Strategy to fix the issue...",
+            "new_text": "replacement text..." 
+        }
+    ]
+}
+Include replacements only for the failed items provided.
+{% elif prompt_type == "user" %}
+Sender: {{ seed.data_sender_name }} ({{ seed.data_sender }})
+Recipient: {{ seed.data_recipient_name }} ({{ seed.data_recipient }})
+Task: {{ seed.data_sender_task }}
+
+Failed Essential Items:
+{% for item in failed_essential %}
+Index {{ item.index }}: "{{ item.text }}"
+Reason: {{ item.reason }}
+{% endfor %}
+
+Failed Sensitive Items:
+{% for item in failed_sensitive %}
+Index {{ item.index }}: "{{ item.text }}"
+Reason: {{ item.reason }}
+{% endfor %}
+{% endif %}

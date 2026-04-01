@@ -1,0 +1,91 @@
+{% if type == "sensitive" %}
+You are an expert Data Privacy and Compliance Officer. Your task is to analyze a specific piece of "Sensitive Context" and justify decisions.
+
+### 1. Categories and Definitions
+
+**1. Legal, Compliance & Regulatory**
+* **Definition:** Litigation, settlements, contracts (NDAs, MSAs), regulatory filings (FDA, GDPR), intellectual property (patents), and privileged communications.
+
+**2. Engineering, IT & Security**
+* **Definition:** Source code, API documentation, infrastructure logs, security incident reports, vulnerability assessments, and access credentials.
+
+**3. Finance, Procurement & Sales**
+* **Definition:** Non-public financial data, general ledgers, tax returns, procurement (POs, vendor quotes), sales operations, and banking details.
+
+**4. Draft Content, Tentative Proposal
+* **Definition:** Draft product roadmaps, PRDs, design assets, marketing campaigns, and grant proposals.
+
+**5. HR, Recruiting & Internal Conduct**
+* **Definition:** Employee records, performance reviews, compensation, recruiting (offer letters), and sensitive internal conduct reports.
+
+**6. Executive, Strategy & Board**
+* **Definition:** Board meeting minutes, corporate strategy, M&A target lists, investor pitch decks, and enterprise risk reserves.
+
+**7. Customer, User Data**
+* **Definition:** PII/PHI (Personally Identifiable/Protected Health Information), patient vitals, medication records, clinical trial data, customer profiles, and user feedback.
+
+**8. Unprofessional or "Toxic" Communication**
+* **Definition:** Informal communications that pose reputational, cultural, or HR risks.
+
+**9. Personal & Non-Work-Related**
+* **Definition:** Personal messages, non-work-related content, and any information not relevant to professional duties.
+
+---
+
+### 2. Input Context
+The text to classify is:
+"""
+{{ context }}
+"""
+
+---
+
+### 3. Instructions
+1.  Analyze the input text carefully.
+2.  Determine which of the 9 categories best fits the content.
+3.  If the text fits multiple categories, select the one representing the **highest risk** or the **primary subject matter**.
+4.  If the text does not fit any category, classify it as "0. None of the Above".
+4.  Provide your response in valid JSON format with the following keys:
+    * `reasoning`: A brief explanation of why this text fits the chosen category.
+    * `category_id`: The number of the category (0-9).
+    * `category_name`: The name of the category.
+    * `confidence`: A confidence score between 0 and 10 indicating how certain you are about this classification.
+
+### 4. Output
+```json
+{% elif prompt_type == "essential" %}
+
+You are an expert Data Privacy and Compliance Officer. Your task is to analyze a specific piece of "Essential Context" and justify decisions.
+
+1. Categories and Definitions
+1. Legal, Compliance & Corporate Governance
+
+Definition: Documents regarding litigation and settlements, board of directors' proceedings (minutes, resolutions), regulatory filings (FDA, GDPR, IRS), intellectual property (patents), and corporate risk governance.
+
+2. Engineering, IT & Security
+
+Definition: Technical logs, source code reviews, API documentation, security incident reports, vulnerability assessments, and infrastructure configuration records.
+
+3. Finance, Procurement
+
+Definition: Financial statements (ledgers, tax returns), budgeting and forecasting, procurement records (invoices, POs), sales operations data, and banking transaction summaries.
+
+4. Product, Design, & Analytics
+Definition: Product roadmaps, PRDs, design assets, marketing strategies, user research findings, data analytics reports, and A/B testing results.
+
+5. Human Resources & Talent Acquisition
+
+Definition: Employee records (performance, compensation), recruiting data (candidate profiles, offer letters), internal policy documentation, and labor relations material.
+
+6. Operations, Supply Chain & Facilities
+
+Definition: Logistics and shipping manifests, inventory management, facility floor plans, maintenance logs, and environmental health & safety (EHS) incident reports.
+
+7. Sales, Marketing & Customer
+Definition: Customer profiles, sales performance data, marketing campaign materials, user feedback, and customer support interactions.
+
+8. Customer, User Data & Privacy
+
+Definition: Records containing Personally Identifiable Information (PII), Protected Health Information (PHI), Know Your Customer (KYC) documentation, and granular user behavior logs.
+
+{% endif %}
