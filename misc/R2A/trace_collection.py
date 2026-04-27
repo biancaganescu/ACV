@@ -5,6 +5,16 @@ import json
 import os
 import argparse
 from typing import Dict, List, Optional
+from tqdm import tqdm
+
+import random, numpy as np
+
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
 
 # Model name mapping for selected cases
 MODEL_NAME_MAPPING = {
@@ -29,7 +39,50 @@ DATASET_CONFIG = {
             "split": "test",
             "unique_id_key": "session_id",
         },
-}
+    "gsm8k":
+        {
+            "path": "OpenAI/gsm8k",
+            "subset": "main",
+            "split": "test",
+            "unique_id_key": "id",
+        },
+    "gsm8k_OS_rephrased":
+        {
+            "path": "./data/rephrased/gsm8k_OS_rephrased.jsonl",
+            "subset": None,
+            "split": None,
+            "unique_id_key": "id",
+        },
+    "gsm8k_PASSIVE_rephrased":
+        {
+            "path": "./data/rephrased/gsm8k_PASSIVE_rephrased.jsonl",
+            "subset": None,
+            "split": None,
+            "unique_id_key": "id",
+        },
+    "gsm8k_SOM_rephrased":
+        {
+            "path": "./data/rephrased/gsm8k_SOM_rephrased.jsonl",
+            "subset": None,
+            "split": None,
+            "unique_id_key": "id",
+        },
+    "gsm8k_RH_rephrased":
+        {
+            "path": "./data/rephrased/gsm8k_RH_rephrased.jsonl",
+            "subset": None,
+            "split": None,
+            "unique_id_key": "id",
+        },
+    "gsm8k_SOM_correct_OG_incorrect":
+        {
+            "path": "./data/rephrased/df_SOM_correct_OG_incorrect.jsonl",
+            "subset": None,
+            "split": None,
+            "unique_id_key": "id",
+        }
+        }
+    
 
 # Constants
 DEFAULT_OUTPUT_DIR = "output/reasoning_traces"
@@ -64,7 +117,11 @@ def parse_arguments():
                         help="Index of the run for logging purposes")
     parser.add_argument("--greedy_decoding", action="store_true", default=False,
                         help="Use greedy decoding instead of sampling during generation")
-    
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--type", type=str, default=None)
+    parser.add_argument("--output_path", type=str, default=None)    
+
     return parser.parse_args()
 
 def get_run_name(args, model_name: str) -> str:
@@ -128,12 +185,18 @@ def load_selected_cases(args, model_name: str) -> List[str]:
         
     return selected_cases
 
-def get_raw_problem(sample: dict, dataset_name: str) -> str:
+def get_raw_problem(sample: dict, dataset_name: str, args) -> str:
     """Extract the raw problem from the sample based on the dataset."""
     if dataset_name == "MATH-500":
         return sample['problem']
     elif dataset_name == "WildBench":
         return sample['conversation_input'][0]['content']
+    elif dataset_name == "gsm8k":
+        return sample['question']
+    elif "rephrased" in dataset_name:
+        return sample['paraphrased_problem']
+    elif "correct" in dataset_name and "incorrect" in dataset_name:
+        return sample["original_problem"] if args.type == "OG" else sample["parapharsed_problem"]
     else:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
 
@@ -165,7 +228,7 @@ def save_results(results: List[dict], output_path: str) -> None:
 
 def main():
     args = parse_arguments()
-    
+    set_seed(args.seed)
     # Disable gradient computation for inference
     torch.set_grad_enabled(False)
     
@@ -175,8 +238,8 @@ def main():
     
     # Generate run name and output path
     run_name = get_run_name(args, model_name)
-    args.output_path = f"{DEFAULT_OUTPUT_DIR}/{dataset_name}_{run_name}_{args.run_index}.jsonl"
-    print(f"Output path set to: {args.output_path}")
+    # args.output_path = f"{DEFAULT_OUTPUT_DIR}/{dataset_name}_{run_name}_{args.run_index}.jsonl"
+    # print(f"Output path set to: {args.output_path}")
     
     # Create output directory if it doesn't exist
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
@@ -194,8 +257,15 @@ def main():
     
     # Load dataset
     print(f"Loading dataset: {DATASET_CONFIG[dataset_name]['path']}")
-    if DATASET_CONFIG[dataset_name]['subset'] is not None:
+    if dataset_name == "gsm8k":
+        print("Loading GSM8K dataset")
         dataset = load_dataset(DATASET_CONFIG[dataset_name]['path'], DATASET_CONFIG[dataset_name]['subset'], split=DATASET_CONFIG[dataset_name]['split'])
+        dataset = dataset.add_column("id", list(range(len(dataset))))
+    elif DATASET_CONFIG[dataset_name]['subset'] is not None:
+        dataset = load_dataset(DATASET_CONFIG[dataset_name]['path'], DATASET_CONFIG[dataset_name]['subset'], split=DATASET_CONFIG[dataset_name]['split'])
+    elif "rephrased" in dataset_name or ("correct" in dataset_name and "incorrect" in dataset_name):
+        with open(DATASET_CONFIG[dataset_name]['path'], 'r') as f:
+            dataset = [json.loads(line) for line in f]
     else:
         dataset = load_dataset(DATASET_CONFIG[dataset_name]['path'], split=DATASET_CONFIG[dataset_name]['split'])
     
@@ -205,59 +275,99 @@ def main():
     # Load selected cases if provided
     selected_cases = load_selected_cases(args, model_name) if args.selected_cases_file_path else []
     
-    # Process samples
     results_buffer = []
+    uid_key = DATASET_CONFIG[dataset_name]['unique_id_key']
+    selected_cases_set = set(selected_cases)  # O(1) lookup
+    pending_samples = []
     for i, sample in enumerate(dataset):
         if args.limit is not None and i >= args.limit:
             break
-            
-        sample_id = sample[DATASET_CONFIG[dataset_name]['unique_id_key']]
-
-        # Skip if not in selected cases (when using selected cases)
-        if len(selected_cases) > 0 and sample_id not in selected_cases:
-            print(f"Skipping sample {i} (unique_id: {sample_id}) - not in selected cases.")
+        sample_id = sample[uid_key]
+        if selected_cases_set and sample_id not in selected_cases_set:
             continue
-    
-        # Skip samples that already have results
         if sample_id in existing_results:
-            print(f"Skipping sample {i} (unique_id: {sample_id}) - already processed.")
             continue
-    
-        # Print sample information
-        raw_problem = get_raw_problem(sample, dataset_name)
-        print(f"Processing sample {i}: {raw_problem}")
-    
-        # Format the problem
-        problem = format_problem(raw_problem, args)
-        inputs = tokenizer(problem, return_tensors="pt").to(model.device)
-    
-        # Configure streamer for output
-        streamer = TextStreamer(tokenizer, skip_special_tokens=False)
+        pending_samples.append(sample)
+
+    print(f"Samples to process: {len(pending_samples)}")
+    if args.batch_size > 1:
+        # Left-pad for decoder-only models
+        tokenizer.padding_side = "left"
+        tokenizer.pad_token = tokenizer.eos_token
+
+        for batch_idx, batch_start in enumerate(tqdm(range(0, len(pending_samples), args.batch_size), desc="Batches")):
+            batch = pending_samples[batch_start : batch_start + args.batch_size]
+            problems = [format_problem(get_raw_problem(s, dataset_name), args) for s in batch]
+            inputs = tokenizer(problems, return_tensors="pt", padding=True).to(model.device)
+            
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=not args.greedy_decoding,
+                temperature=args.temperature if not args.greedy_decoding else None,
+                # streamer=streamer
+            )
+            
+            for j, (sample, out) in enumerate(zip(batch, outputs)):
+                response = tokenizer.decode(out, skip_special_tokens=False)
+                results_buffer.append({"unique_id": sample[uid_key], "problem": get_raw_problem(sample, dataset_name), "response": response})
+            if (batch_idx + 1) % args.save_frequency == 0:
+                save_results(results_buffer, args.output_path)
+                results_buffer = []  # Clear the buffer after saving
+
+    # Process samples
+    else:
+        for i, sample in enumerate(tqdm(dataset, desc="Samples", total=args.limit or len(dataset))):
+            if args.limit is not None and i >= args.limit:
+                break
+                
+            sample_id = sample[DATASET_CONFIG[dataset_name]['unique_id_key']]
+
+            # Skip if not in selected cases (when using selected cases)
+            if selected_cases_set and sample_id not in selected_cases_set:
+                print(f"Skipping sample {i} (unique_id: {sample_id}) - not in selected cases.")
+                continue
         
-        # Generate response
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=not args.greedy_decoding,
-            temperature=args.temperature if not args.greedy_decoding else None,
-            streamer=streamer
-        )
-    
-        # Decode the response
-        response = tokenizer.decode(outputs[0], skip_special_tokens=False)
-    
-        # Store result
-        results_buffer.append({
-            'unique_id': sample_id,
-            'problem': raw_problem,
-            'response': response,
-        })
-    
+            # Skip samples that already have results
+            if sample_id in existing_results:
+                print(f"Skipping sample {i} (unique_id: {sample_id}) - already processed.")
+                continue
+        
+            # Print sample information
+            raw_problem = get_raw_problem(sample, dataset_name, args)
+            print(f"Processing sample {i}: {raw_problem}")
+        
+            # Format the problem
+            problem = format_problem(raw_problem, args)
+            inputs = tokenizer(problem, return_tensors="pt").to(model.device)
+        
+            # Configure streamer for output
+            streamer = TextStreamer(tokenizer, skip_special_tokens=False)
+            
+            # Generate response
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=not args.greedy_decoding,
+                temperature=args.temperature if not args.greedy_decoding else None,
+                # streamer=streamer
+            )
+        
+            # Decode the response
+            response = tokenizer.decode(outputs[0], skip_special_tokens=False)
+        
+            # Store result
+            results_buffer.append({
+                'unique_id': sample_id,
+                'problem': raw_problem,
+                'response': response,
+            })
+        
         # Save results periodically
-        if (i + 1) % args.save_frequency == 0:
-            save_results(results_buffer, args.output_path)
-            results_buffer = []  # Clear the buffer after saving
-    
+            if (i + 1) % args.save_frequency == 0:
+                save_results(results_buffer, args.output_path)
+                results_buffer = []  # Clear the buffer after saving
+        
     # Save any remaining results
     if results_buffer:
         save_results(results_buffer, args.output_path)
